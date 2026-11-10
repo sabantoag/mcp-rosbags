@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from io import BytesIO
 
-from rosbags.rosbag2 import Reader
+from bag_io import open_bag as Reader
 
 # Use PIL for image processing (lightweight, no OpenCV needed)
 from PIL import Image

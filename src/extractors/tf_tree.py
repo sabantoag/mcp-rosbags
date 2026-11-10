@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 from collections import defaultdict
 
-from rosbags.rosbag2 import Reader
+from bag_io import open_bag as Reader
 
 logger = logging.getLogger(__name__)
 

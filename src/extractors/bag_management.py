@@ -10,7 +10,8 @@ import logging
 from pathlib import Path
 from datetime import datetime
 
-from rosbags.rosbag2 import Reader, Writer
+from rosbags.rosbag2 import Writer
+from bag_io import open_bag as Reader
 from rosbags.serde import serialize_cdr
 import sqlite3
 
@@ -80,6 +81,9 @@ async def filter_bag(
     try:
         # Open source bag
         with Reader(source_path) as reader:
+            if reader.kind == "ros1":
+                return {"error": "filter_bag writes ROS 2 bags and cannot copy ROS 1 .bag messages. "
+                                 "Convert first with: rosbags-convert --src <bag> --dst <dir>"}
             # Get metadata
             connections = list(reader.connections)
             

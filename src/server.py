@@ -18,8 +18,17 @@ from mcp.server import Server
 from mcp.types import Tool, TextContent
 import mcp.server.stdio
 
-from rosbags.rosbag2 import Reader
-from rosbags.serde import deserialize_cdr
+from bag_io import (
+    open_bag as Reader,
+    find_bags,
+    is_bag_path,
+    is_ros2_bag_dir,
+    bag_size_bytes,
+    bag_kind,
+    normalize_msgtype,
+    deserialize as bag_deserialize,
+    BAG_SUFFIXES,
+)
 
 # Import core utilities
 from core.message_utils import msg_to_dict
@@ -110,61 +119,32 @@ def initialize_components():
 
 def _is_ros2_bag_dir(path: Path) -> bool:
     """Check if a directory is a ROS 2 bag directory."""
-    return (path / 'metadata.yaml').exists()
+    return is_ros2_bag_dir(path)
 
 def _get_bag_files(custom_path: Optional[str] = None) -> List[Path]:
-    """Get all rosbag files in the directory or from custom path."""
-    bags = []
-    
-    # Determine the search path
+    """Get all rosbag files (ROS 1 .bag, ROS 2 directories, .mcap, .db3) at the path."""
     if custom_path:
         search_path = Path(custom_path)
     else:
         search_path = CURRENT_BAG_PATH or BAG_DIRECTORY
-    
+
     if not search_path or not search_path.exists():
         logger.warning(f"Search path does not exist: {search_path}")
         return []
-    
-    # Handle single file
-    if search_path.is_file() and search_path.suffix in ['.mcap', '.db3']:
-        logger.debug(f"Found single bag file: {search_path}")
-        return [search_path]
-    
-    # Handle directory cases
-    if search_path.is_dir():
-        # Check if this is a ROS 2 bag directory itself
-        if _is_ros2_bag_dir(search_path):
-            logger.debug(f"Found ROS 2 bag directory: {search_path}")
-            return [search_path]
-        
-        # Otherwise look for bags inside
-        for item in search_path.iterdir():
-            if item.is_dir() and _is_ros2_bag_dir(item):
-                # ROS 2 bag directory
-                bags.append(item)
-            elif item.is_file() and item.suffix in ['.mcap', '.db3']:
-                # Individual bag files
-                bags.append(item)
-        
-        # Also check subdirectories one level deep
-        for subdir in search_path.iterdir():
-            if subdir.is_dir() and not _is_ros2_bag_dir(subdir):
-                for item in subdir.iterdir():
-                    if item.is_dir() and _is_ros2_bag_dir(item):
-                        bags.append(item)
-    
+
+    bags = find_bags(search_path)
     logger.debug(f"Found {len(bags)} bag files/directories")
-    return sorted(bags)
+    return bags
 
 def _deserialize_message(rawdata: bytes, msg_type: str) -> Tuple[Any, Dict[str, Any]]:
     """Deserialize message data and apply schema extraction."""
-    msg = deserialize_cdr(rawdata, msg_type)
+    # Decodes ROS 1 or ROS 2 messages, using definitions stored in the bag
+    msg = bag_deserialize(rawdata, msg_type)
     msg_dict = msg_to_dict(msg, msg_type)
     
-    # Apply schema extraction if available
+    # Apply schema extraction if available (schemas use ROS 2 style names)
     if schema_manager:
-        extracted = schema_manager.extract_fields(msg_dict, msg_type)
+        extracted = schema_manager.extract_fields(msg_dict, normalize_msgtype(msg_type))
         return msg, extracted
     else:
         return msg, msg_dict
@@ -326,7 +306,7 @@ async def set_bag_path(path: str) -> Dict[str, Any]:
         logger.error(f"Path does not exist: {path}")
         return {"error": f"Path does not exist: {path}"}
     
-    if path_obj.is_file() and path_obj.suffix not in ['.mcap', '.db3']:
+    if path_obj.is_file() and path_obj.suffix not in BAG_SUFFIXES:
         logger.error(f"Invalid bag file: {path}")
         return {"error": f"File is not a rosbag: {path}"}
     
@@ -344,6 +324,7 @@ async def set_bag_path(path: str) -> Dict[str, Any]:
             "success": True,
             "type": "file",
             "path": str(path_obj),
+            "format": bag_kind(path_obj),
             "size_mb": path_obj.stat().st_size / (1024 * 1024)
         }
     elif _is_ros2_bag_dir(path_obj):
@@ -367,7 +348,7 @@ async def set_bag_path(path: str) -> Dict[str, Any]:
             "type": "directory",
             "path": str(path_obj),
             "bag_count": len(bag_files),
-            "bags": [str(f.name) for f in bag_files]
+            "bags": [str(f.relative_to(path_obj)) if f.is_relative_to(path_obj) else str(f.name) for f in bag_files]
         }
 
 async def get_message_at_time(topic: str, timestamp: float, tolerance: float, bag_path: Optional[str] = None) -> Dict[str, Any]:
@@ -482,20 +463,11 @@ async def list_bags(path: Optional[str] = None) -> Dict[str, Any]:
             bag_data = {
                 "path": str(bag_file),
                 "name": bag_file.name,
-                "type": "directory" if bag_file.is_dir() else "file"
+                "type": "directory" if bag_file.is_dir() else "file",
+                "format": bag_kind(bag_file)
             }
             
-            # Add size info
-            if bag_file.is_file():
-                bag_data["size_mb"] = bag_file.stat().st_size / (1024 * 1024)
-            else:
-                # ROS 2 bag directory
-                total_size = 0
-                for f in bag_file.glob("*.db3"):
-                    total_size += f.stat().st_size
-                for f in bag_file.glob("*.mcap"):
-                    total_size += f.stat().st_size
-                bag_data["size_mb"] = total_size / (1024 * 1024)
+            bag_data["size_mb"] = bag_size_bytes(bag_file) / (1024 * 1024)
             
             # Try to get quick metadata without reading all messages
             try:
@@ -536,7 +508,7 @@ async def bag_info(bag_path: str) -> Dict[str, Any]:
         logger.error(f"Path does not exist: {bag_path}")
         return {"error": f"Path does not exist: {bag_path}"}
     
-    if not (path.is_file() and path.suffix in ['.mcap', '.db3']) and not _is_ros2_bag_dir(path):
+    if not is_bag_path(path):
         logger.error(f"Not a valid rosbag: {bag_path}")
         return {"error": f"Not a valid rosbag: {bag_path}"}
     
@@ -551,17 +523,8 @@ async def bag_info(bag_path: str) -> Dict[str, Any]:
         "compression": None
     }
     
-    # Calculate size
-    if path.is_file():
-        info["size_mb"] = path.stat().st_size / (1024 * 1024)
-    else:
-        # ROS 2 bag directory
-        total_size = 0
-        for f in path.glob("*.db3"):
-            total_size += f.stat().st_size
-        for f in path.glob("*.mcap"):
-            total_size += f.stat().st_size
-        info["size_mb"] = total_size / (1024 * 1024)
+    info["size_mb"] = bag_size_bytes(path) / (1024 * 1024)
+    info["format"] = bag_kind(path)
     
     try:
         with Reader(path) as reader:

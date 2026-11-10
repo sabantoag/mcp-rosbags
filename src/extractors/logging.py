@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 from collections import defaultdict
 
-from rosbags.rosbag2 import Reader
+from bag_io import open_bag as Reader
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +22,24 @@ LOG_LEVELS = {
 }
 
 LEVEL_NAMES = {v: k for k, v in LOG_LEVELS.items()}
+
+# ROS 2 uses 10/20/30/40/50 for the same levels. Map them to the ROS 1 values
+# so both formats share one set of names.
+ROS2_LEVEL_TO_CANONICAL = {10: 1, 20: 2, 30: 4, 40: 8, 50: 16}
+
+
+def _canonical_level(level: int) -> int:
+    return ROS2_LEVEL_TO_CANONICAL.get(level, level)
+
+
+def _pick_log_topic(connections) -> Optional[str]:
+    """ROS 1 records /rosout_agg (all nodes) and often /rosout too (duplicates).
+    Prefer /rosout_agg, fall back to /rosout (ROS 2)."""
+    topics = {conn.topic for conn in connections}
+    for candidate in ("/rosout_agg", "/rosout"):
+        if candidate in topics:
+            return candidate
+    return None
 
 
 async def analyze_logs(
@@ -77,12 +95,13 @@ async def analyze_logs(
     for bag_path in bags:
         try:
             with Reader(bag_path) as reader:
-                # Check if /rosout exists
-                if "/rosout" not in [conn.topic for conn in reader.connections]:
+                # ROS 1: /rosout_agg. ROS 2: /rosout.
+                log_topic = _pick_log_topic(reader.connections)
+                if log_topic is None:
                     continue
                 
                 for conn, timestamp, rawdata in reader.messages():
-                    if conn.topic != "/rosout":
+                    if conn.topic != log_topic:
                         continue
                     
                     time_sec = timestamp / 1e9
@@ -101,7 +120,7 @@ async def analyze_logs(
                     
                     _, msg_dict = _deserialize_message_fn(rawdata, conn.msgtype)
                     
-                    msg_level = msg_dict.get("level", 0)
+                    msg_level = _canonical_level(msg_dict.get("level", 0))
                     msg_node = msg_dict.get("name", "unknown")
                     
                     # Apply filters

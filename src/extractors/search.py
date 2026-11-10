@@ -7,7 +7,7 @@ import re
 from typing import Dict, Any, List, Optional, Callable
 import logging
 from pathlib import Path
-from rosbags.rosbag2 import Reader
+from bag_io import open_bag as Reader
 
 logger = logging.getLogger(__name__)
 

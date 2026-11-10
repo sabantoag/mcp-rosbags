@@ -13,6 +13,14 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _normalize_type(msg_type: str) -> str:
+    """Use ROS 2 style 'pkg/msg/Name' for ROS 1 style 'pkg/Name' names."""
+    parts = msg_type.replace('.', '/').split('/')
+    if len(parts) == 2:
+        return f"{parts[0]}/msg/{parts[1]}"
+    return '/'.join(parts)
+
+
 class SchemaManager:
     """Manages message schemas and field extraction."""
     
@@ -31,7 +39,7 @@ class SchemaManager:
     def extract_fields(self, msg_dict: Dict[str, Any], msg_type: str) -> Dict[str, Any]:
         """Extract fields based on schema or return processed full message."""
         # Normalize message type (handle both / and . notation)
-        normalized_type = msg_type.replace('.', '/')
+        normalized_type = _normalize_type(msg_type)
         
         if normalized_type not in self.schemas:
             # No schema defined, return full message with array processing
@@ -137,7 +145,7 @@ class SchemaManager:
     
     def get_position_field(self, msg_type: str) -> Optional[str]:
         """Get the position field path for a message type."""
-        normalized_type = msg_type.replace('.', '/')
+        normalized_type = _normalize_type(msg_type)
         
         # Common position extractors
         position_paths = {
@@ -153,7 +161,7 @@ class SchemaManager:
     
     def get_velocity_field(self, msg_type: str) -> Optional[str]:
         """Get the velocity field path for a message type."""
-        normalized_type = msg_type.replace('.', '/')
+        normalized_type = _normalize_type(msg_type)
         
         # Common velocity extractors
         velocity_paths = {
