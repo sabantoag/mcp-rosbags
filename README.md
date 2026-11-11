@@ -17,6 +17,16 @@ This MCP server provides comprehensive tools for ROS bag analysis, supporting bo
 - **Visualization**: Generate plots and visual representations of data
 - **Search & Discovery**: Find objects, patterns, and correlations in data
 
+## Sabanto fork
+
+This fork adds ROS 1 `.bag` support (alongside ROS 2), honors the `MCP_ROSBAG_DIR` and `MCP_ROSBAG_CONFIG` environment variables, and starts on Windows. It is packaged so it can be launched straight from git:
+
+```
+uvx --from git+https://github.com/sabantoag/mcp-rosbags mcp-rosbag-server
+```
+
+For development: `uv run --locked python src/server.py` (needs [uv](https://docs.astral.sh/uv/)). Dependencies are pinned in `uv.lock`. Do not move `mcp` past 1.x or `rosbags` past 0.9.x without testing, because newer versions removed APIs this server uses.
+
 ## Installation
 
 1. **Clone the repository:**

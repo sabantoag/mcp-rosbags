@@ -6,6 +6,7 @@ MCP server for rosbag memory capabilities with simplified tools.
 import asyncio
 import json
 import os
+import tempfile
 import yaml
 import time
 import base64
@@ -48,7 +49,8 @@ from extractors.image import register_image_tools
 import logging
 
 # Setup logging
-log_file = f"/tmp/mcp_rosbag_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+# Use the platform temp directory (a hard-coded /tmp does not exist on Windows)
+log_file = os.path.join(tempfile.gettempdir(), f"mcp_rosbag_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -60,7 +62,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Global configuration
-CONFIG_DIR = Path(os.environ.get("MCP_ROSBAG_CONFIG", "./config"))
+# Default to the config folder shipped next to this file (works when installed as a package)
+CONFIG_DIR = Path(os.environ.get("MCP_ROSBAG_CONFIG") or Path(__file__).resolve().parent / "config")
 BAG_DIRECTORY = Path(os.environ.get("MCP_ROSBAG_DIR", "./rosbags"))
 CURRENT_BAG_PATH = None  # Can be a single file or directory
 
@@ -599,14 +602,15 @@ async def bag_info(bag_path: str) -> Dict[str, Any]:
 
 async def main():
     """Run the MCP server."""
+    global BAG_DIRECTORY, CONFIG_DIR
     import argparse
     
     parser = argparse.ArgumentParser(description="MCP server for rosbag memory")
-    parser.add_argument("--bag-dir", default="./rosbags", help="Directory containing rosbag files")
-    parser.add_argument("--config-dir", default="./config", help="Directory containing configuration files")
+    # Environment variables set the defaults, so MCP_ROSBAG_DIR and MCP_ROSBAG_CONFIG work
+    parser.add_argument("--bag-dir", default=str(BAG_DIRECTORY), help="Directory containing rosbag files")
+    parser.add_argument("--config-dir", default=str(CONFIG_DIR), help="Directory containing configuration files")
     args = parser.parse_args()
     
-    global BAG_DIRECTORY, CONFIG_DIR
     BAG_DIRECTORY = Path(args.bag_dir)
     CONFIG_DIR = Path(args.config_dir)
     
@@ -628,5 +632,9 @@ async def main():
     except Exception as e:
         logger.error(f"Server error: {e}", exc_info=True)
 
-if __name__ == "__main__":
+def run():
+    """Console script entry point."""
     asyncio.run(main())
+
+if __name__ == "__main__":
+    run()

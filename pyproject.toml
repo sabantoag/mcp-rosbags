@@ -1,0 +1,36 @@
+[project]
+name = "mcp-rosbags"
+version = "0.2.0"
+description = "MCP server for reading ROS 1 and ROS 2 bags (Sabanto fork)"
+readme = "README.md"
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    # Version limits are required: rosbags 0.10+ removed deserialize_cdr,
+    # and mcp 2.x removed Server.list_tools.
+    "mcp>=1.30,<2",
+    "rosbags>=0.9.23,<0.10",
+    "numpy",
+    "pillow",
+    "plotly",
+    "pyyaml",
+    "jinja2",
+    "typeguard",
+]
+
+[project.scripts]
+mcp-rosbag-server = "server:run"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = ["server", "bag_io"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["core*", "extractors*", "config*"]
+
+[tool.setuptools.package-data]
+config = ["*.yaml"]
